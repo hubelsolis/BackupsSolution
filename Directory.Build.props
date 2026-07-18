@@ -1,0 +1,9 @@
+<Project>
+  <!-- Defaults inocuos para todo el repo. TargetFramework y TreatWarningsAsErrors
+       se fijan por proyecto (solo Grupo 3) para no romper Grupo 1/2/4. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
