@@ -1,11 +1,55 @@
-﻿namespace Backups.Core.Domain.Entities;
-public class SolicitudRespaldo
+using System.Text.Json.Serialization;
+
+namespace Backups.Core.Domain.Entities;
+
+public sealed record SolicitudRespaldo
 {
-    public string NombreCopia { get; set; } = string.Empty;
-    public string TipoDisparo { get; set; } = "TIMER"; 
-    public string RutaOrigen { get; set; } = string.Empty;
-    public string UltimoHashConocido { get; set; } = string.Empty;
-    public string AlgoritmoCompresion { get; set; } = "ZIP"; 
-    public int LimiteVolumenMb { get; set; }
-    public string IdDestinoConfig { get; set; } = string.Empty;
+    [JsonPropertyName("nombreCopia")]
+    public required string NombreCopia { get; init; }
+
+    [JsonPropertyName("tipoDisparo")]
+    public required TipoDisparo TipoDisparo { get; init; }
+
+    [JsonPropertyName("rutaOrigen")]
+    public required string RutaOrigen { get; init; }
+
+    /// <summary>Opcional segun el contrato: si es null, se consulta el ultimo hash confirmado del log fisico.</summary>
+    [JsonPropertyName("ultimoHashConocido")]
+    public string? UltimoHashConocido { get; init; }
+
+    [JsonPropertyName("algoritmoCompresion")]
+    public required AlgoritmoCompresion AlgoritmoCompresion { get; init; }
+
+    [JsonPropertyName("limiteVolumenMb")]
+    public required int LimiteVolumenMb { get; init; }
+
+    [JsonPropertyName("idDestinoConfig")]
+    public required string IdDestinoConfig { get; init; }
+
+    public IReadOnlyList<string> Validar()
+    {
+        var errores = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(NombreCopia))
+        {
+            errores.Add("nombreCopia es requerido.");
+        }
+
+        if (string.IsNullOrWhiteSpace(RutaOrigen))
+        {
+            errores.Add("rutaOrigen es requerido.");
+        }
+
+        if (string.IsNullOrWhiteSpace(IdDestinoConfig))
+        {
+            errores.Add("idDestinoConfig es requerido.");
+        }
+
+        if (LimiteVolumenMb <= 0)
+        {
+            errores.Add("limiteVolumenMb debe ser mayor a 0.");
+        }
+
+        return errores;
+    }
 }

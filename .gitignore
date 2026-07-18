@@ -1,0 +1,11 @@
+﻿# Build artifacts
+[Bb]in/
+[Oo]bj/
+TestResults/
+coveragereport/
+.vs/
+*.user
+*.suo
+
+# Rider / VS
+.idea/

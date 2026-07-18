@@ -1,0 +1,33 @@
+{
+  "connectionStrings": {
+    "DefaultConnection": "Server=localhost,1433;Database=BackupsSolutionDB;User Id=sa;Password=BackupSolution2024!"
+  },
+  "ftp": {
+    "host": "localhost",
+    "port": 21,
+    "username": "ftpuser",
+    "password": "FtpPassword123!",
+    "remotePath": "/backups"
+  },
+  "sftp": {
+    "host": "localhost",
+    "port": 2222,
+    "username": "sftpuser",
+    "password": "SftpPassword123!",
+    "remotePath": "/backups"
+  },
+  "logging": {
+    "level": "Information",
+    "path": "./data/logs/backup.log"
+  },
+  "compression": {
+    "7z_path": "C:\\Program Files\\7-Zip\\7z.exe",
+    "rar_path": "C:\\Program Files\\WinRAR\\rar.exe"
+  },
+  "timer": {
+    "intervaloSegundos": 3600
+  },
+  "hash": {
+    "algoritmoDefault": "SHA256"
+  }
+}

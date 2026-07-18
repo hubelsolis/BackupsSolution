@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+    branches: [main, nucleo-de-control]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test-sonar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 10.0.x es necesario ademas de 8.0.x: el SDK 8 no entiende el .slnx
+      # del repo (formato mas nuevo). Ver CHANGELOG.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Instalar dotnet-sonarscanner
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: Sonar begin
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet-sonarscanner begin `
+            /k:"${{ vars.SONAR_PROJECT_KEY }}" `
+            /o:"${{ vars.SONAR_ORGANIZATION }}" `
+            /d:sonar.token="$env:SONAR_TOKEN" `
+            /d:sonar.host.url="https://sonarcloud.io"
+
+      - name: Build (Release)
+        run: dotnet build BackupsSolution.slnx -c Release
+
+      - name: Test con cobertura (opencover)
+        run: |
+          dotnet test tests/Backups.Domain.Tests/Backups.Domain.Tests.csproj -c Release --no-build --collect:"XPlat Code Coverage;Format=opencover" --results-directory ./TestResults
+          dotnet test tests/Backups.Adapters.Tests/Backups.Adapters.Tests.csproj -c Release --no-build --collect:"XPlat Code Coverage;Format=opencover" --results-directory ./TestResults
+
+      - name: Sonar end
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet-sonarscanner end /d:sonar.token="$env:SONAR_TOKEN"

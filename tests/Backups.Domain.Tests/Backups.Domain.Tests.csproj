@@ -1,25 +1,32 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="NetArchTest.Rules" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Backups.Domain sigue vacio (no se crea un nucleo paralelo ahi, ver
+       CHANGELOG); este proyecto de test referencia el proyecto REAL,
+       Backups.Core, y Adapters.Infrastructure para las reglas NetArchTest. -->
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Backups.Domain\Backups.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Backups.Core\Backups.Core.csproj" />
+    <ProjectReference Include="..\..\src\Backups.Adapters.Infrastructure\Backups.Adapters.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

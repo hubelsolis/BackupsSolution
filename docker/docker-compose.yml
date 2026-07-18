@@ -1,0 +1,110 @@
+version: "3.8"
+
+# Infraestructura de pruebas para BackupsSolution:
+#   - SQL Server 2019  (BD BackupsSolutionDB)
+#   - Pure-FTPD        (servidor FTP)
+#   - atmoz/sftp       (servidor SFTP)
+#
+# Uso:
+#   cd docker
+#   docker-compose up -d
+#   docker-compose ps
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: backups-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "BackupSolution2024!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./db-init:/docker-entrypoint-initdb.d
+    networks:
+      - backups-net
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" -b -o /dev/null"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # SQL Server no ejecuta automáticamente los scripts de docker-entrypoint-initdb.d
+  # (solo lo hacen imágenes como postgres/mysql), por lo que este servicio auxiliar
+  # espera a que la BD esté healthy y ejecuta init.sql y seed-data.sql con sqlcmd.
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: backups-sqlserver-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    volumes:
+      - ./db-init:/scripts
+    networks:
+      - backups-net
+    entrypoint: >
+      bash -c "
+      /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P 'BackupSolution2024!' -C -i /scripts/init.sql &&
+      /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P 'BackupSolution2024!' -C -i /scripts/seed-data.sql
+      "
+    restart: "no"
+
+  ftp:
+    image: stilliard/pure-ftpd:hardened
+    container_name: backups-ftp
+    environment:
+      PUBLICHOST: "localhost"
+      FTP_USER_NAME: "ftpuser"
+      FTP_USER_PASS: "FtpPassword123!"
+      FTP_USER_HOME: "/home/ftpusers/ftpuser"
+    ports:
+      - "21:21"
+      - "30000-30009:30000-30009"
+    volumes:
+      - ../data/backups:/home/ftpusers/ftpuser/backups
+      - ftp-data:/etc/pure-ftpd/passwd
+    networks:
+      - backups-net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/21"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  sftp:
+    image: atmoz/sftp:latest
+    container_name: backups-sftp
+    command: sftpuser:SftpPassword123!:1001:1001:backups
+    ports:
+      - "2222:22"
+    volumes:
+      - ../data/backups:/home/sftpuser/backups
+      - sftp-data:/home/sftpuser/.ssh
+    networks:
+      - backups-net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/22"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+networks:
+  backups-net:
+    driver: bridge
+
+volumes:
+  sqlserver-data:
+  ftp-data:
+  sftp-data:
