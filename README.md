@@ -1,171 +1,98 @@
-# BackupsSolution
+# BackupsSolution — Grupo 1: Núcleo de Control y Orquestación
 
-Sistema de Gestión de Copias de Seguridad y Réplicas — motor de respaldos asíncronos, multi-protocolo y resiliente en C# .NET 8.0 WinForms.
+## Responsabilidad (doc/RFS.txt)
 
-Arquitectura **Hexagonal (Ports & Adapters)** con separación por grupos de trabajo.
+El Grupo 1 (Mamani, Fabian, Yllescas) es responsable del **Núcleo de Control y Orquestación** del sistema de respaldos. Este módulo gestiona:
 
----
-
-## Estado actual
-
-| Grupo | Responsabilidad | Estado |
-|---|---|---|
-| **Grupo 1** — Núcleo de Control | Orquestación, colas LIFO, Timer, validación SHA256, log TXT | ✅ Completo (51 tests) |
-| **Grupo 2** — Compresión | ZIP/RAR/LZMA + segmentación por volumen | ⏳ Stub (pendiente integración) |
-| **Grupo 3** — Transmisión | FTP/SFTP/SSH | ⏳ Stub (pendiente integración) |
-| **Grupo 4** — UI WinForms | Formulario de configuración y envío | ⏳ Esqueleto |
-| **CI/CD** | Build + Test + SonarCloud | ✅ Configurado |
+- **F1.** Ciclo de vida del proceso de respaldo (Pendiente → En cola → En ejecución → Completado → Registrado)
+- **F2.** Ejecución automática de respaldos mediante temporizador (Timer)
+- **F3.** Ejecución manual de respaldos desde la interfaz gráfica (botón)
+- **F4.** Validación de cambios antes del respaldo (hash SHA-256)
+- **F5.** Gestión de la cola de respaldos (tareas pendientes, evitar duplicados)
+- **F6.** Registro del estado en archivo TXT físico local
 
 ---
 
-## Cambios recientes (respecto a la versión anterior)
+## Qué se implementó
 
-- **Migración .NET 10 → .NET 8** (decisión del equipo)
-- **Reestructuración completa del Core**: de 4 archivos a 27 con arquitectura hexagonal limpia
-- **51 tests** con cobertura: Core 94.9% / Adapters 85.1%
-- **Puertos asíncronos** (async/await en todos los puertos de entrada y salida)
-- **Log en TXT** (append-only con concurrencia) en vez de JSON
-- **Timer periódico** con anti-solapamiento (SemaphoreSlim)
-- **Cola LIFO** para gestión de tareas de envío
-- **Central Package Management** (CPM) para versiones de NuGet
-- **CI/CD** con GitHub Actions + SonarCloud
-- **Docker** con SQL Server 2019 + Pure-FTPD + SFTP
+### Orquestador (`OrquestadorRespaldos.cs`)
 
----
+Caso de uso principal que orquesta el flujo completo:
 
-## Estructura del proyecto
+1. Valida la solicitud (campos requeridos)
+2. Calcula hash SHA-256 del archivo origen
+3. Compara con el último hash confirmado en el log
+4. Si **no hay cambios** → descarta y registra `OMITIDO_SIN_CAMBIOS`
+5. Si **hay cambios** → registra `INICIADO` y apila la tarea en la pila LIFO
 
-```
-BackupsSolution/
-├── .github/workflows/build.yml        CI: build + test + SonarCloud
-├── BackupsSolution.slnx               Solution file (.slnx)
-├── Directory.Build.props              Props globales: LangVersion=latest
-├── Directory.Packages.props           Central Package Management
-├── global.json                        SDK pin: 8.0.10
-├── sonar-project.properties           Config SonarCloud
-├── .gitignore
-│
-├── config/config.json                 Config de la app
-├── data/backups/.gitkeep              Carpeta de respaldos
-├── data/logs/.gitkeep                 Carpeta de logs
-├── docker/                            SQL Server + FTP + SFTP
-├── doc/                               Contrato SDD + Requerimientos
-│
-├── src/
-│   ├── Backups.Core/                  Núcleo (Grupo 1)
-│   ├── Backups.Adapters.Infrastructure/  Adaptadores driven (Grupo 1)
-│   ├── Backups.Infrastructure.Compression/ Stub (Grupo 2)
-│   ├── Backups.Infrastructure.Network/    Stub (Grupo 3)
-│   ├── Backups.UI/                    UI WinForms nueva (Grupo 4)
-│   ├── Backups.Adapters.UI.WinForms/ UI WinForms original (Grupo 4)
-│   ├── Backups.Domain/                Placeholder (vacío)
-│   └── Backups.Ports/                 Placeholder (vacío)
-│
-├── tests/
-│   ├── Backups.Domain.Tests/          Tests de dominio + arquitectura
-│   └── Backups.Adapters.Tests/        Tests de adaptadores + orquestador
-│
-└── control-nucleo-test/               Directorio legacy (vacío)
-```
+Implementa: `IEjecutarRespaldoUseCase`
 
----
+### Procesador de pila (`ProcesadorPila.cs`)
 
-## Backups.Core — Núcleo de Control (Grupo 1)
+Drena la pila LIFO de tareas y ejecuta el flujo de compresión + transmisión:
 
-### Orquestador
+1. Desapila tarea (LIFO: última en entrar, primera en salir)
+2. Transición a `COMPRIMIENDO_VOLUMENES` → llama a `ICompressionService` (Grupo 2)
+3. Transición a `ENVIANDO` → llama a `ITransmissionService` (Grupo 3)
+4. Registra `COMPLETADO` o `FALLIDO` según el resultado
 
-| Archivo | Función |
+### Servicio de temporizador (`ServicioTemporizador.cs`)
+
+Bucle de ticks periódicos con anti-solapamiento:
+
+- Usa `PeriodicTimer` (.NET 8) expuesto como `IAsyncEnumerable<DateTimeOffset>`
+- **Anti-solapamiento**: si el tick anterior sigue en curso, omite el siguiente (SemaphoreSlim)
+- Ejecuta la acción de respaldo en background por cada tick
+
+### Dominio (`Domain/`)
+
+| Archivo | Descripción |
 |---|---|
-| `OrquestadorRespaldos.cs` | Caso de uso principal: valida solicitud, compara hash SHA256, apila tarea o la descarta como "sin cambios" |
-| `ProcesadorPila.cs` | Drena la pila LIFO de tareas y delega compresión + transmisión con transiciones de estado |
-| `ServicioTemporizador.cs` | Bucle de ticks con anti-solapamiento (SemaphoreSlim), ejecuta acción por tick en background |
+| `Enums.cs` | `TipoDisparo` (TIMER, BOTON_MANUAL), `AlgoritmoCompresion` (ZIP, RAR, LZMA), `Protocolo` (FTP, SFTP, SSH), `EstadoRespaldo` — serializables como JSON string |
+| `MensajesContrato.cs` | Constantes de texto del contrato |
+| `SolicitudRespaldo.cs` | Record inmutable con solicitud de respaldo y método `Validar()` |
+| `TareaRespaldo.cs` | Record ligero (BackupId, Solicitud, HashActual) apilado en la pila |
+| `RespuestaEjecucion.cs` | DTO de respuesta: BackupId + EstadoInicial |
+| `RegistroFisico.cs` | Record de una línea del log TXT |
+| `LogRespaldo.cs` | DTO delgado para el historial |
+| `DestinoConfig.cs` | Record de configuración de destino de red |
 
-### Dominio
+### Puertos (`Ports/`)
 
-| Archivo | Función |
+**Puertos de entrada (Use Cases):**
+
+| Puerto | Función |
 |---|---|
-| `Domain/Enums.cs` | Enums serializables como JSON string: `TipoDisparo`, `AlgoritmoCompresion`, `Protocolo`, `EstadoRespaldo` |
-| `Domain/MensajesContrato.cs` | Constantes de texto del contrato |
-| `Domain/Entities/SolicitudRespaldo.cs` | Record inmutable con solicitud de respaldo y método `Validar()` |
-| `Domain/Entities/TareaRespaldo.cs` | Record ligero (BackupId, Solicitud, HashActual) apilado en la pila |
-| `Domain/Entities/RespuestaEjecucion.cs` | DTO de respuesta: BackupId + EstadoInicial |
-| `Domain/Entities/RegistroFisico.cs` | Record de una línea del log TXT |
-| `Domain/Entities/LogRespaldo.cs` | DTO delgado para el historial |
-| `Domain/Entities/DestinoConfig.cs` | Record de configuración de destino de red |
+| `IEjecutarRespaldoUseCase` | `EjecutarAsync(SolicitudRespaldo, CancellationToken)` |
+| `IObtenerHistorialUseCase` | `ObtenerHistorialAsync(CancellationToken)` |
 
-### Puertos
+**Puertos de salida (interfaces que implementan los adaptadores):**
 
-| Puerto | Dirección | Función |
-|---|---|---|
-| `IEjecutarRespaldoUseCase` | In | `EjecutarAsync(SolicitudRespaldo, CancellationToken)` |
-| `IObtenerHistorialUseCase` | In | `ObtenerHistorialAsync(CancellationToken)` |
-| `IArchivoPort` | Out | Existe, ObtenerÚltimaModificación, ObtenerTamaño, AbrirLectura |
-| `ICalculadoraHashPort` | Out | `CalcularSha256Async(ruta, ct)` |
-| `ICompressionService` | Out | `ComprimirYSegmentar(ruta, algoritmo, límiteMb)` |
-| `IConfiguracionPort` | Out | ObtenerRutaLogTxt, ObtenerIntervaloTimerSegundos, ObtenerAlgoritmoHashDefault |
-| `IPilaEnviosPort` | Out | Pila LIFO FILO: Apilar, TryDesapilar, Cantidad |
-| `IRegistroLogPort` | Out | EscribirAsync, LeerHistorialAsync, ObtenerÚltimoHashConfirmadoAsync |
-| `ITemporizadorPort` | Out | `IAsyncEnumerable<DateTimeOffset> TicksAsync` + `IAsyncDisposable` |
-| `ITransmissionService` | Out | `EnviarArchivos(List<string>, string idDestino)` |
+| Puerto | Función |
+|---|---|
+| `IArchivoPort` | Existe, ObtenerÚltimaModificación, ObtenerTamaño, AbrirLectura |
+| `ICalculadoraHashPort` | `CalcularSha256Async(ruta, ct)` |
+| `ICompressionService` | `ComprimirYSegmentar(ruta, algoritmo, límiteMb)` — Grupo 2 |
+| `IConfiguracionPort` | ObtenerRutaLogTxt, ObtenerIntervaloTimerSegundos, ObtenerAlgoritmoHashDefault |
+| `IPilaEnviosPort` | Pila LIFO FILO: Apilar, TryDesapilar, Cantidad |
+| `IRegistroLogPort` | EscribirAsync, LeerHistorialAsync, ObtenerÚltimoHashConfirmadoAsync |
+| `ITemporizadorPort` | `IAsyncEnumerable<DateTimeOffset> TicksAsync` + `IAsyncDisposable` |
+| `ITransmissionService` | `EnviarArchivos(List<string>, string idDestino)` — Grupo 3 |
 
----
+### Adaptadores (`Backups.Adapters.Infrastructure/`)
 
-## Backups.Adapters.Infrastructure — Adaptadores (Grupo 1)
-
-| Archivo | Implementa | Función |
+| Adaptador | Implementa | Descripción |
 |---|---|---|
 | `ArchivoAdapter.cs` | `IArchivoPort` | Passthrough sobre `System.IO.File` |
 | `ConfiguracionAdapter.cs` | `IConfiguracionPort` | Lee `config.json` via `Microsoft.Extensions.Configuration` |
 | `LogTxtAdapter.cs` | `IRegistroLogPort` | Log append-only en TXT, serializado con pipe, concurrencia por `SemaphoreSlim` |
 | `PilaEnviosMemoria.cs` | `IPilaEnviosPort` | Pila LIFO sobre `ConcurrentStack<TareaRespaldo>` |
-| `Sha256HashAdapter.cs` | `ICalculadoraHashPort` | SHA-256 en streaming via `SHA256.HashDataAsync` (.NET 8) |
+| `Sha256HashAdapter.cs` | `ICalculadoraHashPort` | SHA-256 en streaming via `SHA256.HashDataAsync` |
 | `TemporizadorPeriodico.cs` | `ITemporizadorPort` | `PeriodicTimer` (.NET 8) expuesto como `IAsyncEnumerable` |
 
 ---
 
-## Otros proyectos
-
-### Backups.Infrastructure.Compression (Grupo 2 — Stub)
-
-`CompressionAdapter.cs` — Stub que imprime por consola y retorna lista fake. Pendiente de implementar ZIP/RAR/LZMA real.
-
-### Backups.Infrastructure.Network (Grupo 3 — Stub)
-
-`NetworkTransmissionAdapter.cs` — Stub que imprime por consola y retorna `true`. Pendiente de implementar FTP/SFTP/SSH real.
-
-### Backups.UI / Backups.Adapters.UI.WinForms (Grupo 4)
-
-Dos formularios WinForms: `FormConfig` (nueva, con botón "Enviar Respaldo") y `Form1` (original, esqueleto con menú).
-
----
-
-## Tests (51 pruebas)
-
-### tests/Backups.Domain.Tests/ (3 archivos)
-
-| Archivo | Qué testea |
-|---|---|
-| `SolicitudRespaldoTests.cs` | Validación de campos requeridos, tipos de disparo, algoritmos |
-| `EnumSerializacionTests.cs` | Serialización JSON de enums al literal exacto del contrato |
-| `ArquitecturaTests.cs` | Reglas arquitectónicas: Core.Domain y Core.Ports no dependen de Adapters |
-
-### tests/Backups.Adapters.Tests/ (7 archivos)
-
-| Archivo | Qué testea |
-|---|---|
-| `OrquestadorRespaldosTests.cs` | Hash igual → OMITIDO, hash distinto → INICIADO, primera copia, archivo inexistente |
-| `ProcesadorPilaTests.cs` | Transiciones COMPRIMIENDO → ENVIANDO → COMPLETADO, fallo de envío |
-| `ServicioTemporizadorTests.cs` | Anti-solapamiento (tick omitido si anterior sigue en curso) |
-| `PilaEnviosMemoriaTests.cs` | Behavior LIFO (A,B,C → C,B,A) |
-| `LogTxtAdapterTests.cs` | Round-trip escribir/leer, 100 escrituras concurrentes, hash confirmado |
-| `Sha256HashAdapterTests.cs` | Hash de string vacío conocido, formato hex 64 chars |
-| `ConfiguracionAdapterTests.cs` | Lectura de config.json, excepción si falta clave |
-
-**Framework:** xUnit 2.9.3 | **Mocking:** NSubstitute 6.0.0 | **Arquitectura:** NetArchTest.Rules 1.3.2
-
----
-
-## Flujo del sistema
+## Flujo completo
 
 ```
 Timer/Botón → OrquestadorRespaldos.EjecutarAsync()
@@ -200,52 +127,48 @@ Timer/Botón → OrquestadorRespaldos.EjecutarAsync()
 
 ---
 
+## Cobertura por funcionalidad (RFS)
+
+| Funcionalidad | Implementada | Archivos involucrados |
+|---|---|---|
+| **F1** Ciclo de vida del respaldo | ✅ | `OrquestadorRespaldos.cs`, `RegistroFisico.cs`, `LogTxtAdapter.cs` |
+| **F2** Ejecución automática (Timer) | ✅ | `ServicioTemporizador.cs`, `TemporizadorPeriodico.cs` |
+| **F3** Ejecución manual (botón) | ✅ | `OrquestadorRespaldos.cs` (recibe solicitud con `TipoDisparo`) |
+| **F4** Validación de cambios (SHA-256) | ✅ | `OrquestadorRespaldos.cs`, `Sha256HashAdapter.cs` |
+| **F5** Gestión de cola de respaldos | ✅ | `ProcesadorPila.cs`, `PilaEnviosMemoria.cs` |
+| **F6** Registro en TXT | ✅ | `LogTxtAdapter.cs`, `RegistroFisico.cs` |
+
+---
+
+## Tests (51 pruebas)
+
+### tests/Backups.Domain.Tests/
+
+| Archivo | Qué testea |
+|---|---|
+| `SolicitudRespaldoTests.cs` | Validación de campos requeridos, tipos de disparo, algoritmos |
+| `EnumSerializacionTests.cs` | Serialización JSON de enums al literal exacto del contrato |
+| `ArquitecturaTests.cs` | Core.Domain y Core.Ports no dependen de Adapters (NetArchTest) |
+
+### tests/Backups.Adapters.Tests/
+
+| Archivo | Qué testea |
+|---|---|
+| `OrquestadorRespaldosTests.cs` | Hash igual → OMITIDO, hash distinto → INICIADO, primera copia, archivo inexistente |
+| `ProcesadorPilaTests.cs` | Transiciones COMPRIMIENDO → ENVIANDO → COMPLETADO, fallo de envío |
+| `ServicioTemporizadorTests.cs` | Anti-solapamiento (tick omitido si anterior sigue en curso) |
+| `PilaEnviosMemoriaTests.cs` | Behavior LIFO (A,B,C → C,B,A) |
+| `LogTxtAdapterTests.cs` | Round-trip escribir/leer, 100 escrituras concurrentes, hash confirmado |
+| `Sha256HashAdapterTests.cs` | Hash de string vacío conocido, formato hex 64 chars |
+| `ConfiguracionAdapterTests.cs` | Lectura de config.json, excepción si falta clave |
+
+**Framework:** xUnit 2.9.3 | **Mocking:** NSubstitute 6.0.0 | **Cobertura:** Core 94.9% / Adapters 85.1%
+
+---
+
 ## Ejecución
 
 ```powershell
-# Compilar
 dotnet build
-
-# Ejecutar tests
 dotnet test
-
-# Ejecutar la app WinForms
-dotnet run --project src/Backups.UI
 ```
-
----
-
-## Tecnologías
-
-| Componente | Tecnología |
-|---|---|
-| Lenguaje | C# (LangVersion=latest) |
-| Framework | .NET 8.0 |
-| UI | Windows Forms |
-| Testing | xUnit 2.9.3 + NSubstitute 6.0.0 |
-| Arquitectura | NetArchTest.Rules 1.3.2 |
-| Coverage | coverlet.collector 10.0.1 |
-| Config | Microsoft.Extensions.Configuration |
-| CI/CD | GitHub Actions + SonarCloud |
-| Docker | SQL Server 2019 + Pure-FTPD + atmoz/sftp |
-| Contrato | OpenAPI 3.0.3 |
-
----
-
-## Contrato (SDD)
-
-Definido en `doc/contratoSDD.yaml`:
-
-- `POST /backups/ejecutar` — Ejecuta un respaldo (Timer o botón)
-- `GET /backups/historial` — Obtiene el registro de respaldos
-- `POST /config/destinos` — Registra un destino de red
-
----
-
-## Requerimientos funcionales
-
-Definidos en `doc/RFS.txt`:
-
-- **RF2** — Soporte Legacy (DBF/Fox): detectar archivos bloqueados antes de respaldar
-- **RF3** — Backup de archivos locales: registrar carpetas y leer recursivamente
-- **RF4** — Sincronización dinámica: detectar cambios por hash/fecha y solo copiar lo modificado
